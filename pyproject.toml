@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "envy-terminal"
+version = "0.1.0"
+description = "A local terminal assistant with explicit memory, document search, and cited public-source research."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = "MIT"
+dependencies = [
+  "httpx==0.28.1",
+  "beautifulsoup4==4.15.0",
+  "pypdf==6.21.3",
+  "ddgs==9.16.1",
+  "rich==14.3.4",
+  "prompt-toolkit==3.0.53",
+  "keyring>=25,<26",
+]
+
+[project.scripts]
+envy = "envy_terminal.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/envy_terminal"]
+
+[dependency-groups]
+dev = ["huggingface-hub>=0.30,<2"]
