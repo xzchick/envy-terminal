@@ -1,18 +1,30 @@
-# ENVY Terminal
+<p align="center">
+  <img src="docs/assets/hero.svg" width="100%" alt="ENVY Terminal — local intelligence and evidence you can inspect" />
+</p>
 
-Local AI. Your Terminal. Sources you can inspect.
+<p align="center"><b>A local AI workspace. Entirely in your Terminal.</b><br />Fast answers, searchable documents, and research with sources you can inspect.</p>
 
-A macOS-first assistant for everyday questions, writing, document research, and public-record investigation. Run a fast local model or switch to Fable, search PDFs with page references, and save only the conversations you choose.
+<p align="center">
+  <a href="docs/SETUP.md"><b>Install ENVY →</b></a> &nbsp; · &nbsp;
+  <a href="docs/COMMANDS.md">Command guide</a> &nbsp; · &nbsp;
+  <a href="docs/RESEARCH.md">Research workflow</a> &nbsp; · &nbsp;
+  <a href="docs/PRIVACY.md">Privacy</a>
+</p>
 
-![ENVY Terminal overview](docs/assets/hero.svg)
+<p align="center">
+  <a href="https://github.com/xzchick/envy-terminal/actions/workflows/tests.yml"><img src="https://github.com/xzchick/envy-terminal/actions/workflows/tests.yml/badge.svg" alt="Automated tests" /></a>
+  &nbsp; <code>macOS-first</code> &nbsp; <code>Python</code> &nbsp; <code>Ollama</code> &nbsp; <code>MIT</code>
+</p>
 
-**Terminal only · local model inference · explicit memory · searchable PDFs · public-source research**
+---
 
 ## Start here
 
-Install [Ollama](https://ollama.com/download/mac), [uv](https://docs.astral.sh/uv/getting-started/installation/), and Git. Then, from this repository:
+Install [Ollama](https://ollama.com/download/mac), [uv](https://docs.astral.sh/uv/getting-started/installation/), and Git. Clone the project and start from Terminal:
 
 ```sh
+git clone https://github.com/xzchick/envy-terminal.git
+cd envy-terminal
 sh scripts/setup.sh
 sh scripts/start.sh
 ```
