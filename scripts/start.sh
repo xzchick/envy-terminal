@@ -14,7 +14,11 @@ if [ "$(uname -s)" = Darwin ]; then
 else
     support="${XDG_DATA_HOME:-$HOME/.local/share}/envy-terminal"
 fi
-mkdir -p "$support"
+if [ -L "$support" ]; then
+    echo "Refusing symlinked support directory: $support" >&2
+    exit 1
+fi
+mkdir -p -m 700 "$support"
 chmod 700 "$support"
 if ! curl --noproxy '*' --connect-timeout 1 --max-time 2 -fsS "$ENVY_OLLAMA_URL/api/version" >/dev/null 2>&1; then
     echo 'Starting local Ollama on 127.0.0.1:11435…'

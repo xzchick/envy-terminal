@@ -47,9 +47,9 @@ def warm_model(model=MODEL):
 
 def user_path(value):
     value=value.strip()
-    if os.name=='nt' or ('\\' in value and '/' not in value):
-        if len(value)>=2 and value[0]==value[-1] and value[0] in ('"',"'"):
-            value=value[1:-1]
+    unquoted=value[1:-1] if len(value)>=2 and value[0]==value[-1] and value[0] in ('"',"'") else value
+    if os.name=='nt' or re.match(r'^(?:[A-Za-z]:\\|\\\\)',unquoted):
+        value=unquoted
     else:
         try:
             parts=shlex.split(value)
@@ -402,8 +402,14 @@ def main():
             if q.startswith('/file '):app.attach(q[6:]);continue
             if q.startswith('/save '):
                 p=user_path(q[6:])
-                with os.fdopen(os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600),'w',encoding='utf-8') as f:json.dump({'messages':app.messages,'sources':app.sources},f,ensure_ascii=False,indent=2)
-                features.private_file(p)
+                fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+                try:
+                    features.private_file(p)
+                except Exception:
+                    os.close(fd)
+                    p.unlink(missing_ok=True)
+                    raise
+                with os.fdopen(fd,'w',encoding='utf-8') as f:json.dump({'messages':app.messages,'sources':app.sources},f,ensure_ascii=False,indent=2)
                 console.print('Saved only at your request: '+str(p),markup=False);continue
             if q=='/pacer':
                 console.print('PACER requires your own account. Searches/documents may incur fees. No automated paid access is enabled.\nDownload records there and use /file to analyze them locally.')

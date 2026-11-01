@@ -26,7 +26,7 @@ class SmokeTests(unittest.TestCase):
         win_raw = r'"C:\Users\Example User\Documents\filing.pdf"'
         self.assertEqual(str(cli.user_path(win_raw)), r'C:\Users\Example User\Documents\filing.pdf')
         posix_raw = "'/tmp/example file.txt'"
-        self.assertEqual(str(cli.user_path(posix_raw)), '/tmp/example file.txt')
+        self.assertEqual(cli.user_path(posix_raw).as_posix(), '/tmp/example file.txt')
 
     def test_cli_main_interactive_session_smoke(self):
         with tempfile.TemporaryDirectory() as tmp:
