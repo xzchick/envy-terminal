@@ -31,7 +31,7 @@ MODEL = os.environ.get('ENVY_DEEP_MODEL', 'envy-fable')
 LOCAL_API = os.environ.get('ENVY_OLLAMA_URL', 'http://127.0.0.1:11435').rstrip('/')
 if urlparse(LOCAL_API).scheme != 'http' or urlparse(LOCAL_API).hostname not in ('127.0.0.1','localhost','::1'):
     raise ValueError('ENVY_OLLAMA_URL must point to a local HTTP Ollama service.')
-OCR_HELPER = Path(os.environ.get('ENVY_OCR', str(Path.home()/'Library/Application Support/ENVY Terminal/envy-ocr')))
+OCR_HELPER = Path(os.environ.get('ENVY_OCR', str(features.OCR_HELPER)))
 MODEL_OPTIONS = {'num_ctx':32768,'temperature':0.6,'top_p':0.95,'repeat_penalty':1.05}
 KEEP_ALIVE = '30m'
 
@@ -47,10 +47,14 @@ def warm_model(model=MODEL):
 
 def user_path(value):
     value=value.strip()
-    try:
-        parts=shlex.split(value)
-        if len(parts)==1:value=parts[0]
-    except ValueError:pass
+    if os.name=='nt' or ('\\' in value and '/' not in value):
+        if len(value)>=2 and value[0]==value[-1] and value[0] in ('"',"'"):
+            value=value[1:-1]
+    else:
+        try:
+            parts=shlex.split(value)
+            if len(parts)==1:value=parts[0]
+        except ValueError:pass
     return Path(value).expanduser()
 SYSTEM = """You are ENVY AI, a general-purpose local assistant for research, writing, and everyday tasks.
 Be direct, precise, and candid. Start with a concise answer; expand when the user asks or the task requires detail.
@@ -399,10 +403,17 @@ def main():
             if q.startswith('/save '):
                 p=user_path(q[6:])
                 with os.fdopen(os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600),'w',encoding='utf-8') as f:json.dump({'messages':app.messages,'sources':app.sources},f,ensure_ascii=False,indent=2)
+                features.private_file(p)
                 console.print('Saved only at your request: '+str(p),markup=False);continue
             if q=='/pacer':
                 console.print('PACER requires your own account. Searches/documents may incur fees. No automated paid access is enabled.\nDownload records there and use /file to analyze them locally.')
-                if prompt.prompt('Open the official PACER site? [y/N] ').lower()=='y':subprocess.run(['/usr/bin/open','https://pacer.uscourts.gov/'],check=True)
+                if prompt.prompt('Open the official PACER site? [y/N] ').lower()=='y':
+                    if sys.platform=='darwin' and Path('/usr/bin/open').is_file():
+                        subprocess.run(['/usr/bin/open','https://pacer.uscourts.gov/'],check=True)
+                    else:
+                        import webbrowser
+                        if not webbrowser.open('https://pacer.uscourts.gov/'):
+                            raise RuntimeError('Could not open a browser automatically. Visit https://pacer.uscourts.gov/ manually.')
                 continue
             if q.startswith('/person '):q='Research this person using relevant public sources: '+q[8:]+'. First disambiguate identity using professional role, jurisdiction or other supplied context; ask if ambiguous. Report relevant public biographical facts, public work and public court records if pertinent. Do not build dossiers of private contact details, home addresses, government IDs, credentials, family members or real-time whereabouts. Distinguish documented facts, allegations, disputed claims and unknowns. Cite retrieved sources and dates, identify possible namesakes and do not claim exhaustive coverage.'
             elif q.startswith('/check '):q='Fact-check this claim using retrieved evidence. Show a claim-by-claim evidence table with exact short quotes and page citations, contradictions and remaining uncertainty. Do not infer truth from citation existence: '+q[7:]

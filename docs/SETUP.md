@@ -2,13 +2,17 @@
 
 ## Requirements
 
-This release targets Apple Silicon macOS. The Python chat/library code may work elsewhere, but the setup script, Vision OCR, and credential backend are macOS-specific and have not been ported or validated for Windows/Linux.
+ENVY Terminal supports macOS, Windows, and Linux:
+
+- **macOS**: Uses `~/Library/Application Support/ENVY Terminal`, macOS Keychain, and builds the optional Apple Vision PDF OCR helper (`envy-ocr`) when Xcode Command Line Tools (`xcode-select --install`) are installed.
+- **Windows**: Uses `%LOCALAPPDATA%\ENVY Terminal` (protected with owner-only NTFS DACLs), Windows Credential Manager, and PowerShell launchers (`scripts/setup.ps1`, `scripts/start.ps1`).
+- **Linux**: Uses `${XDG_DATA_HOME:-~/.local/share}/envy-terminal` (`0700`/`0600`), freedesktop Secret Service keyring, and POSIX shell launchers (`scripts/setup.sh`, `scripts/start.sh`).
 
 Install from the official sources:
 
-- [Ollama for macOS](https://ollama.com/download/mac)
+- [Ollama](https://ollama.com/download) for macOS, Windows, or Linux
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) for managed Python and dependencies
-- Git and, for OCR, Apple's Command Line Tools: `xcode-select --install`
+- Git and, on macOS for scanned-PDF OCR, Apple's Command Line Tools: `xcode-select --install`
 
 Open a new Terminal after installing these tools. `command -v ollama`, `command -v uv`, and `git --version` should work. No Homebrew or MacPorts assumption is built into the scripts.
 
@@ -19,8 +23,15 @@ Memory planning is approximate, not a compatibility guarantee. Start with Qwen3 
 Clone this repository using its GitHub **Code** button, or download and extract the source ZIP. In Terminal, change into the `envy-terminal` folder.
 
 ```sh
+# macOS and Linux
 sh scripts/setup.sh
 sh scripts/start.sh
+```
+
+```powershell
+# Windows PowerShell
+pwsh -File scripts/setup.ps1
+pwsh -File scripts/start.ps1
 ```
 
 `setup.sh` creates `.venv` using locked dependencies and Python 3.12. It starts/reuses Ollama at `127.0.0.1:11435`, downloads `qwen3:8b` (~5.2 GB), and builds the OCR helper if the Swift compiler is available. It does not copy chats or credentials from an existing ENVY installation. The public project has a separate `ENVY Terminal` data folder and Keychain namespace.
