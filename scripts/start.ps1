@@ -3,17 +3,17 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Repo = Split-Path -Parent $PSScriptRoot
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    throw 'Install uv first: https://docs.astral.sh/uv/getting-started/installation/'
-}
-if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
-    throw 'Install Ollama first: https://ollama.com/download/windows'
-}
 if (-not $env:ENVY_OLLAMA_URL) {
     $env:ENVY_OLLAMA_URL = 'http://127.0.0.1:11435'
 }
 if ($env:ENVY_OLLAMA_URL -ne 'http://127.0.0.1:11435') {
     throw 'For a custom local service, set ENVY_OLLAMA_URL and run uv run envy directly.'
+}
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    throw 'Install uv first: https://docs.astral.sh/uv/getting-started/installation/'
+}
+if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
+    throw 'Install Ollama first: https://ollama.com/download/windows'
 }
 $env:OLLAMA_HOST = '127.0.0.1:11435'
 $env:OLLAMA_NO_CLOUD = '1'
@@ -37,7 +37,7 @@ $Support = Join-Path $SupportBase 'ENVY Terminal'
 
 Push-Location $Repo
 try {
-    uv run --no-editable python -c "from envy_terminal.features import private_dir, default_support_dir; private_dir(default_support_dir())"
+    uv run --locked --no-editable python -c "from envy_terminal.features import private_dir, default_support_dir; private_dir(default_support_dir())"
     if ($LASTEXITCODE -ne 0) { throw 'Failed to lock support directory.' }
     $Ready = Test-LocalOllama
     if (-not $Ready) {

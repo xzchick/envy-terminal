@@ -21,6 +21,20 @@ class SmokeTests(unittest.TestCase):
         with patch.object(features.sys, 'platform', 'linux'), patch.dict(features.os.environ, {'XDG_DATA_HOME': '/tmp/xdg'}, clear=False):
             self.assertEqual(features.default_support_dir(), Path('/tmp/xdg') / 'envy-terminal')
             self.assertEqual(features.credential_store_label(), 'OS Secret Service keyring')
+        with patch.object(features.sys, 'platform', 'linux'), patch.dict(features.os.environ, {'XDG_DATA_HOME': 'relative/path'}, clear=False):
+            self.assertEqual(features.default_support_dir(), Path.home() / '.local/share/envy-terminal')
+
+    def test_launcher_rejects_non_loopback_ollama_url(self):
+        import subprocess
+        repo = Path(__file__).resolve().parent.parent
+        env = dict(os.environ, ENVY_OLLAMA_URL='http://192.168.1.50:11435')
+        if os.name == 'nt':
+            cmd = ['powershell', '-NoProfile', '-File', str(repo / 'scripts' / 'start.ps1'), '-ServeOnly']
+        else:
+            cmd = ['sh', str(repo / 'scripts' / 'start.sh'), '--serve-only']
+        proc = subprocess.run(cmd, cwd=repo, env=env, capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn('custom local service', proc.stdout + proc.stderr)
 
     def test_user_path_preserves_windows_backslashes_and_strips_quotes(self):
         win_raw = r'"C:\Users\Example User\Documents\filing.pdf"'
