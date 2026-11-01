@@ -64,32 +64,67 @@ def windows_sddl(path):
     advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype=wintypes.BOOL
     kernel32.LocalFree.argtypes=[ctypes.c_void_p]
     sd=ctypes.c_void_p()
-    rc=advapi32.GetNamedSecurityInfoW(str(Path(path).resolve()),1,0x04,None,None,None,None,ctypes.byref(sd))
+    rc=advapi32.GetNamedSecurityInfoW(str(Path(path).resolve()),1,0x01|0x04,None,None,None,None,ctypes.byref(sd))
     if rc!=0:raise PermissionError(f'GetNamedSecurityInfoW failed with error {rc} on {path}')
     try:
         sddl_ptr=ctypes.c_void_p()
-        if not advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(sd,1,0x04,ctypes.byref(sddl_ptr),None):
+        if not advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(sd,1,0x01|0x04,ctypes.byref(sddl_ptr),None):
             raise PermissionError(f'ConvertSecurityDescriptorToStringSecurityDescriptorW failed on {path}')
         try:return ctypes.wstring_at(sddl_ptr.value)
         finally:kernel32.LocalFree(sddl_ptr)
     finally:kernel32.LocalFree(sd)
 
+def resolve_windows_sid(trustee):
+    trustee=trustee.strip()
+    if trustee.upper().startswith('S-1-'):return trustee.upper()
+    if os.name!='nt':
+        builtin={'SY':'S-1-5-18','BA':'S-1-5-32-544'}
+        if trustee.upper() in builtin:return builtin[trustee.upper()]
+        raise PermissionError(f'Unresolved Windows SDDL trustee alias: {trustee}')
+    from ctypes import wintypes
+    advapi32=ctypes.windll.advapi32; kernel32=ctypes.windll.kernel32
+    advapi32.ConvertStringSidToSidW.argtypes=[wintypes.LPCWSTR,ctypes.POINTER(ctypes.c_void_p)]
+    advapi32.ConvertStringSidToSidW.restype=wintypes.BOOL
+    advapi32.ConvertSidToStringSidW.argtypes=[wintypes.LPVOID,ctypes.POINTER(ctypes.c_void_p)]
+    advapi32.ConvertSidToStringSidW.restype=wintypes.BOOL
+    kernel32.LocalFree.argtypes=[ctypes.c_void_p]
+    psid=ctypes.c_void_p()
+    if not advapi32.ConvertStringSidToSidW(trustee,ctypes.byref(psid)):
+        raise PermissionError(f'Could not resolve Windows trustee SID: {trustee}')
+    try:
+        str_ptr=ctypes.c_void_p()
+        if not advapi32.ConvertSidToStringSidW(psid,ctypes.byref(str_ptr)):
+            raise PermissionError(f'Could not convert Windows trustee SID: {trustee}')
+        try:return ctypes.wstring_at(str_ptr.value).upper()
+        finally:kernel32.LocalFree(str_ptr)
+    finally:kernel32.LocalFree(psid)
+
 def verify_windows_sddl(sddl,sid,is_dir):
-    if not sddl.startswith('D:P'):
+    user_sid=resolve_windows_sid(sid)
+    allowed_sids={user_sid,'S-1-5-18','S-1-5-32-544'}
+    if 'D:' not in sddl:
+        raise PermissionError(f'Windows SDDL is missing DACL section: {sddl}')
+    owner_part,_,dacl_body=sddl.partition('D:')
+    if not owner_part.startswith('O:'):
+        raise PermissionError(f'Windows SDDL is missing owner section: {sddl}')
+    owner_trustee=owner_part[2:].partition('G:')[0].strip()
+    if not owner_trustee or resolve_windows_sid(owner_trustee) not in allowed_sids:
+        raise PermissionError(f'Disallowed owner in Windows SDDL: {owner_trustee}')
+    if not dacl_body.startswith('P'):
         raise PermissionError(f'Windows DACL is not protected against inheritance: {sddl}')
-    aces=re.findall(r'\(([^)]+)\)',sddl)
+    aces=re.findall(r'\(([^)]+)\)',dacl_body)
     if not aces:raise PermissionError(f'Windows DACL has no ACEs: {sddl}')
-    user_trustees={sid.upper()}|({'LA'} if sid.endswith('-500') else set())
-    allowed_trustees=user_trustees|{'SY','BA'}
     user_ace_found=False
     for ace in aces:
         parts=ace.split(';')
         if len(parts)!=6:raise PermissionError(f'Malformed ACE in Windows DACL: {ace}')
         ace_type,ace_flags,rights,_,_,trustee=parts
-        if ace_type!='A' or 'ID' in ace_flags.upper() or trustee.upper() not in allowed_trustees:
+        flags_upper=ace_flags.upper()
+        trustee_sid=resolve_windows_sid(trustee)
+        if ace_type!='A' or 'ID' in flags_upper or trustee_sid not in allowed_sids:
             raise PermissionError(f'Disallowed ACE in Windows DACL: {ace}')
-        if trustee.upper() in user_trustees and rights.upper()=='FA':
-            if not is_dir or ('OI' in ace_flags.upper() and 'CI' in ace_flags.upper()):
+        if trustee_sid==user_sid and rights.upper()=='FA' and 'IO' not in flags_upper:
+            if not is_dir or ('OI' in flags_upper and 'CI' in flags_upper):
                 user_ace_found=True
     if not user_ace_found:
         raise PermissionError(f'Current user lacks required full-control ACE in Windows DACL: {sddl}')
@@ -123,12 +158,18 @@ def _enforce_windows_acl(path,is_dir):
     finally:kernel32.LocalFree(sd)
     verify_windows_sddl(windows_sddl(target),sid,is_dir=is_dir)
 
+def _is_reparse_or_symlink(path,st):
+    reparse_flag=getattr(stat,'FILE_ATTRIBUTE_REPARSE_POINT',0x400)
+    return path.is_symlink() or stat.S_ISLNK(st.st_mode) or bool(getattr(st,'st_file_attributes',0)&reparse_flag)
+
 def private_dir(path):
     path=Path(path)
-    if path.is_symlink():raise PermissionError(f'Refusing symlinked private directory: {path}')
+    if path.exists() and _is_reparse_or_symlink(path,path.lstat()):
+        raise PermissionError(f'Refusing symlink or reparse-point private directory: {path}')
     path.mkdir(parents=True,exist_ok=True,mode=0o700)
     st=path.lstat()
-    if not stat.S_ISDIR(st.st_mode):raise PermissionError(f'Private path is not a directory: {path}')
+    if _is_reparse_or_symlink(path,st) or not stat.S_ISDIR(st.st_mode):
+        raise PermissionError(f'Private path is not a regular directory: {path}')
     if os.name=='nt':
         _enforce_windows_acl(path,is_dir=True)
     else:
@@ -142,7 +183,7 @@ def private_dir(path):
 def private_file(path):
     path=Path(path)
     st=path.lstat()
-    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+    if _is_reparse_or_symlink(path,st) or not stat.S_ISREG(st.st_mode):
         raise PermissionError(f'Refusing non-regular private file: {path}')
     if os.name=='nt':
         _enforce_windows_acl(path,is_dir=False)

@@ -19,6 +19,11 @@ class FeaturesTest(unittest.TestCase):
   safe=self.store.sessions/'safe.json';db=self.store.root/'library.sqlite3';cfg=self.store.config
   if os.name=='nt':
    sid=f.windows_user_sid()
+   self.assertEqual(f.resolve_windows_sid('WD'),'S-1-1-0')
+   self.assertEqual(f.resolve_windows_sid('BA'),'S-1-5-32-544')
+   self.assertEqual(f.resolve_windows_sid('SY'),'S-1-5-18')
+   la_sid=f.resolve_windows_sid('LA')
+   self.assertTrue(la_sid.startswith('S-1-5-21-') and la_sid.endswith('-500'))
    for d in (self.store.root,self.store.sessions):
     f.verify_windows_sddl(f.windows_sddl(d),sid,is_dir=True)
    for file_path in (safe,db,cfg):
@@ -29,17 +34,34 @@ class FeaturesTest(unittest.TestCase):
    for file_path in (safe,db,cfg):
     self.assertEqual(file_path.stat().st_mode&0o777,0o600)
   sid='S-1-5-21-1000-2000-3000-1001'
-  f.verify_windows_sddl(f'D:PAI(A;OICI;FA;;;{sid})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)',sid,is_dir=True)
-  f.verify_windows_sddl(f'D:PAI(A;;FA;;;{sid})(A;;FA;;;SY)(A;;FA;;;BA)',sid,is_dir=False)
-  f.verify_windows_sddl('D:PAI(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)','S-1-5-21-1000-2000-3000-500',is_dir=True)
-  for insecure in (
-   f'D:AI(A;OICI;FA;;;{sid})',
-   f'D:P(A;OICIID;FA;;;{sid})',
-   f'D:P(A;OICI;FA;;;{sid})(A;OICI;FA;;;WD)',
-   f'D:P(A;OICI;FA;;;{sid})(A;OICI;FA;;;BU)',
-   'D:P(A;OICI;FA;;;SY)',
-  ):
-   with self.assertRaises(PermissionError):f.verify_windows_sddl(insecure,sid,is_dir=True)
+  local_admin='S-1-5-21-1000-2000-3000-500'
+  other_domain_admin='S-1-5-21-9999-8888-7777-500'
+  fake_map={'SY':'S-1-5-18','BA':'S-1-5-32-544','LA':local_admin,'WD':'S-1-1-0','BU':'S-1-5-32-545'}
+  def fake_resolve(t):
+   u=t.strip().upper()
+   if u.startswith('S-1-'):return u
+   if u in fake_map:return fake_map[u]
+   raise PermissionError(u)
+  with patch.object(f,'resolve_windows_sid',side_effect=fake_resolve):
+   f.verify_windows_sddl(f'O:{sid}D:PAI(A;OICI;FA;;;{sid})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)',sid,is_dir=True)
+   f.verify_windows_sddl(f'O:BAD:PAI(A;;FA;;;{sid})(A;;FA;;;SY)(A;;FA;;;BA)',sid,is_dir=False)
+   f.verify_windows_sddl('O:LAD:PAI(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)',local_admin,is_dir=True)
+   for insecure in (
+    f'D:P(A;OICI;FA;;;{sid})',
+    f'O:{sid}D:AI(A;OICI;FA;;;{sid})',
+    f'O:{sid}D:P(A;OICIID;FA;;;{sid})',
+    f'O:{sid}D:P(A;OICIIO;FA;;;{sid})',
+    f'O:{sid}D:P(A;OICI;FA;;;{sid})(A;OICI;FA;;;S-1-1-0)',
+    f'O:{sid}D:P(A;OICI;FA;;;{sid})(A;OICI;FA;;;S-1-5-32-545)',
+    f'O:{sid}D:P(A;OICI;FA;;;{sid})(A;OICI;FA;;;WD)',
+    f'O:{sid}D:P(A;OICI;FA;;;{sid})(A;OICI;FA;;;BU)',
+    f'O:{sid}D:P(A;OICI;FA;;;{sid})(A;OICI;FA;;;LA)',
+    f'O:{other_domain_admin}D:P(A;OICI;FA;;;{sid})',
+    f'O:{sid}D:P(A;OICI;FA;;;SY)',
+   ):
+    with self.assertRaises(PermissionError):f.verify_windows_sddl(insecure,sid,is_dir=True)
+   with self.assertRaises(PermissionError):
+    f.verify_windows_sddl('O:LAD:PAI(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)',other_domain_admin,is_dir=True)
  def test_library_offline_and_delete(self):
   p=self.root/'evidence.txt';p.write_text('The hearing was postponed to September. A complaint is an allegation.')
   ident,count,blank=self.store.add_document(p,'/missing/ocr');self.assertEqual(count,1)
