@@ -79,7 +79,8 @@ def verify_windows_sddl(sddl,sid,is_dir):
         raise PermissionError(f'Windows DACL is not protected against inheritance: {sddl}')
     aces=re.findall(r'\(([^)]+)\)',sddl)
     if not aces:raise PermissionError(f'Windows DACL has no ACEs: {sddl}')
-    allowed_trustees={sid.upper(),'SY','BA'}
+    user_trustees={sid.upper()}|({'LA'} if sid.endswith('-500') else set())
+    allowed_trustees=user_trustees|{'SY','BA'}
     user_ace_found=False
     for ace in aces:
         parts=ace.split(';')
@@ -87,7 +88,7 @@ def verify_windows_sddl(sddl,sid,is_dir):
         ace_type,ace_flags,rights,_,_,trustee=parts
         if ace_type!='A' or 'ID' in ace_flags.upper() or trustee.upper() not in allowed_trustees:
             raise PermissionError(f'Disallowed ACE in Windows DACL: {ace}')
-        if trustee.upper()==sid.upper() and rights.upper()=='FA':
+        if trustee.upper() in user_trustees and rights.upper()=='FA':
             if not is_dir or ('OI' in ace_flags.upper() and 'CI' in ace_flags.upper()):
                 user_ace_found=True
     if not user_ace_found:

@@ -31,6 +31,7 @@ class FeaturesTest(unittest.TestCase):
   sid='S-1-5-21-1000-2000-3000-1001'
   f.verify_windows_sddl(f'D:PAI(A;OICI;FA;;;{sid})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)',sid,is_dir=True)
   f.verify_windows_sddl(f'D:PAI(A;;FA;;;{sid})(A;;FA;;;SY)(A;;FA;;;BA)',sid,is_dir=False)
+  f.verify_windows_sddl('D:PAI(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)','S-1-5-21-1000-2000-3000-500',is_dir=True)
   for insecure in (
    f'D:AI(A;OICI;FA;;;{sid})',
    f'D:P(A;OICIID;FA;;;{sid})',
