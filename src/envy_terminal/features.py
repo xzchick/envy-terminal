@@ -1,5 +1,7 @@
 """Explicit local persistence and private credential handling for ENVY."""
+import ctypes
 import datetime as dt
+import functools
 import getpass
 import hashlib
 import json
@@ -7,32 +9,168 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import stat
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(os.environ.get('ENVY_DATA_DIR', str(Path.home()/'Library/Application Support/ENVY Terminal/data')))
 OCR_HELPER = Path(os.environ.get('ENVY_OCR', str(Path.home()/'Library/Application Support/ENVY Terminal/envy-ocr')))
 FAST_MODEL = os.environ.get('ENVY_FAST_MODEL','qwen3:8b')
+RESERVED_NAMES = {'CON','PRN','AUX','NUL'}|{f'COM{i}' for i in range(1,10)}|{f'LPT{i}' for i in range(1,10)}
+
+@functools.lru_cache(maxsize=1)
+def windows_user_sid():
+    from ctypes import wintypes
+    advapi32=ctypes.windll.advapi32; kernel32=ctypes.windll.kernel32
+    kernel32.GetCurrentProcess.restype=wintypes.HANDLE
+    advapi32.OpenProcessToken.argtypes=[wintypes.HANDLE,wintypes.DWORD,ctypes.POINTER(wintypes.HANDLE)]
+    advapi32.OpenProcessToken.restype=wintypes.BOOL
+    advapi32.GetTokenInformation.argtypes=[wintypes.HANDLE,ctypes.c_int,wintypes.LPVOID,wintypes.DWORD,ctypes.POINTER(wintypes.DWORD)]
+    advapi32.GetTokenInformation.restype=wintypes.BOOL
+    advapi32.ConvertSidToStringSidW.argtypes=[wintypes.LPVOID,ctypes.POINTER(ctypes.c_void_p)]
+    advapi32.ConvertSidToStringSidW.restype=wintypes.BOOL
+    kernel32.CloseHandle.argtypes=[wintypes.HANDLE]
+    kernel32.LocalFree.argtypes=[ctypes.c_void_p]
+    token=wintypes.HANDLE()
+    if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(),0x0008,ctypes.byref(token)):
+        raise PermissionError('Could not open Windows process token.')
+    try:
+        needed=wintypes.DWORD(0)
+        advapi32.GetTokenInformation(token,1,None,0,ctypes.byref(needed))
+        if not needed.value:raise PermissionError('Could not query Windows token size.')
+        buf=ctypes.create_string_buffer(needed.value)
+        if not advapi32.GetTokenInformation(token,1,buf,needed,ctypes.byref(needed)):
+            raise PermissionError('Could not read Windows token user.')
+        sid_ptr=ctypes.cast(buf,ctypes.POINTER(ctypes.c_void_p))[0]
+        str_ptr=ctypes.c_void_p()
+        if not advapi32.ConvertSidToStringSidW(sid_ptr,ctypes.byref(str_ptr)):
+            raise PermissionError('Could not convert Windows user SID.')
+        try:sid=ctypes.wstring_at(str_ptr.value)
+        finally:kernel32.LocalFree(str_ptr)
+    finally:kernel32.CloseHandle(token)
+    if not sid.startswith('S-1-'):raise PermissionError(f'Unexpected Windows SID: {sid}')
+    return sid
+
+def windows_sddl(path):
+    from ctypes import wintypes
+    advapi32=ctypes.windll.advapi32; kernel32=ctypes.windll.kernel32
+    advapi32.GetNamedSecurityInfoW.argtypes=[wintypes.LPCWSTR,ctypes.c_int,wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_void_p),ctypes.POINTER(ctypes.c_void_p),ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),ctypes.POINTER(ctypes.c_void_p)]
+    advapi32.GetNamedSecurityInfoW.restype=wintypes.DWORD
+    advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes=[
+        ctypes.c_void_p,wintypes.DWORD,wintypes.DWORD,ctypes.POINTER(ctypes.c_void_p),ctypes.POINTER(wintypes.ULONG)]
+    advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype=wintypes.BOOL
+    kernel32.LocalFree.argtypes=[ctypes.c_void_p]
+    sd=ctypes.c_void_p()
+    rc=advapi32.GetNamedSecurityInfoW(str(Path(path).resolve()),1,0x04,None,None,None,None,ctypes.byref(sd))
+    if rc!=0:raise PermissionError(f'GetNamedSecurityInfoW failed with error {rc} on {path}')
+    try:
+        sddl_ptr=ctypes.c_void_p()
+        if not advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(sd,1,0x04,ctypes.byref(sddl_ptr),None):
+            raise PermissionError(f'ConvertSecurityDescriptorToStringSecurityDescriptorW failed on {path}')
+        try:return ctypes.wstring_at(sddl_ptr.value)
+        finally:kernel32.LocalFree(sddl_ptr)
+    finally:kernel32.LocalFree(sd)
+
+def verify_windows_sddl(sddl,sid,is_dir):
+    if not sddl.startswith('D:P'):
+        raise PermissionError(f'Windows DACL is not protected against inheritance: {sddl}')
+    aces=re.findall(r'\(([^)]+)\)',sddl)
+    if not aces:raise PermissionError(f'Windows DACL has no ACEs: {sddl}')
+    allowed_trustees={sid.upper(),'SY','BA'}
+    user_ace_found=False
+    for ace in aces:
+        parts=ace.split(';')
+        if len(parts)!=6:raise PermissionError(f'Malformed ACE in Windows DACL: {ace}')
+        ace_type,ace_flags,rights,_,_,trustee=parts
+        if ace_type!='A' or 'ID' in ace_flags.upper() or trustee.upper() not in allowed_trustees:
+            raise PermissionError(f'Disallowed ACE in Windows DACL: {ace}')
+        if trustee.upper()==sid.upper() and rights.upper()=='FA':
+            if not is_dir or ('OI' in ace_flags.upper() and 'CI' in ace_flags.upper()):
+                user_ace_found=True
+    if not user_ace_found:
+        raise PermissionError(f'Current user lacks required full-control ACE in Windows DACL: {sddl}')
+
+def _enforce_windows_acl(path,is_dir):
+    from ctypes import wintypes
+    target=str(Path(path).resolve())
+    sid=windows_user_sid()
+    flags='OICI' if is_dir else ''
+    desired=f'D:P(A;{flags};FA;;;{sid})(A;{flags};FA;;;SY)(A;{flags};FA;;;BA)'
+    advapi32=ctypes.windll.advapi32; kernel32=ctypes.windll.kernel32
+    advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes=[
+        wintypes.LPCWSTR,wintypes.DWORD,ctypes.POINTER(ctypes.c_void_p),ctypes.POINTER(wintypes.ULONG)]
+    advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype=wintypes.BOOL
+    advapi32.GetSecurityDescriptorDacl.argtypes=[
+        ctypes.c_void_p,ctypes.POINTER(wintypes.BOOL),ctypes.POINTER(ctypes.c_void_p),ctypes.POINTER(wintypes.BOOL)]
+    advapi32.GetSecurityDescriptorDacl.restype=wintypes.BOOL
+    advapi32.SetNamedSecurityInfoW.argtypes=[
+        wintypes.LPWSTR,ctypes.c_int,wintypes.DWORD,ctypes.c_void_p,ctypes.c_void_p,ctypes.c_void_p,ctypes.c_void_p]
+    advapi32.SetNamedSecurityInfoW.restype=wintypes.DWORD
+    kernel32.LocalFree.argtypes=[ctypes.c_void_p]
+    sd=ctypes.c_void_p()
+    if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(desired,1,ctypes.byref(sd),None):
+        raise PermissionError(f'Could not build Windows security descriptor for {target}')
+    try:
+        present=wintypes.BOOL(); dacl=ctypes.c_void_p(); defaulted=wintypes.BOOL()
+        if not advapi32.GetSecurityDescriptorDacl(sd,ctypes.byref(present),ctypes.byref(dacl),ctypes.byref(defaulted)) or not present.value:
+            raise PermissionError(f'Could not extract Windows DACL for {target}')
+        rc=advapi32.SetNamedSecurityInfoW(target,1,0x04|0x80000000,None,None,dacl,None)
+        if rc!=0:raise PermissionError(f'SetNamedSecurityInfoW failed with error {rc} on {target}')
+    finally:kernel32.LocalFree(sd)
+    verify_windows_sddl(windows_sddl(target),sid,is_dir=is_dir)
 
 def private_dir(path):
+    path=Path(path)
+    if path.is_symlink():raise PermissionError(f'Refusing symlinked private directory: {path}')
     path.mkdir(parents=True,exist_ok=True,mode=0o700)
-    path.chmod(0o700)
+    st=path.lstat()
+    if not stat.S_ISDIR(st.st_mode):raise PermissionError(f'Private path is not a directory: {path}')
+    if os.name=='nt':
+        _enforce_windows_acl(path,is_dir=True)
+    else:
+        if hasattr(os,'getuid') and st.st_uid!=os.getuid():
+            raise PermissionError(f'Directory {path} is not owned by current user.')
+        path.chmod(0o700)
+        if (path.lstat().st_mode&0o777)!=0o700:
+            raise PermissionError(f'Could not enforce 0700 permissions on {path}')
+    return path
+
+def private_file(path):
+    path=Path(path)
+    st=path.lstat()
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        raise PermissionError(f'Refusing non-regular private file: {path}')
+    if os.name=='nt':
+        _enforce_windows_acl(path,is_dir=False)
+    else:
+        if hasattr(os,'getuid') and st.st_uid!=os.getuid():
+            raise PermissionError(f'File {path} is not owned by current user.')
+        path.chmod(0o600)
+        if (path.lstat().st_mode&0o777)!=0o600:
+            raise PermissionError(f'Could not enforce 0600 permissions on {path}')
     return path
 
 def write_json(path,value):
+    path=Path(path)
     private_dir(path.parent)
     fd,temp=tempfile.mkstemp(dir=path.parent,prefix='.envy-')
+    temp_path=Path(temp)
     try:
-        with os.fdopen(fd,'w') as f:
+        with os.fdopen(fd,'w',encoding='utf-8') as f:
             json.dump(value,f,ensure_ascii=False,indent=2)
             f.flush();os.fsync(f.fileno())
-        os.replace(temp,path)
+        private_file(temp_path)
+        os.replace(temp_path,path)
+        private_file(path)
     finally:
-        if os.path.exists(temp):os.unlink(temp)
+        if temp_path.exists():temp_path.unlink()
 
 def name(value):
-    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9 _-]{0,79}',value):
-        raise ValueError('Use a name of 1–80 letters, numbers, spaces, hyphens or underscores.')
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9 _-]{0,79}',value) or value.strip().upper() in RESERVED_NAMES:
+        raise ValueError('Use a valid name of 1–80 letters, numbers, spaces, hyphens or underscores.')
     return value
 
 class LocalStore:
@@ -40,9 +178,11 @@ class LocalStore:
         self.root=private_dir(Path(root))
         self.sessions=private_dir(self.root/'chats')
         self.config=self.root/'preferences.json'
-        self.preferences=json.loads(self.config.read_text()) if self.config.exists() else {'mode':'fast','notes':[]}
-        self.db=sqlite3.connect(self.root/'library.sqlite3')
-        (self.root/'library.sqlite3').chmod(0o600)
+        if self.config.exists():private_file(self.config)
+        self.preferences=json.loads(self.config.read_text(encoding='utf-8')) if self.config.exists() else {'mode':'fast','notes':[]}
+        db_path=self.root/'library.sqlite3'
+        self.db=sqlite3.connect(db_path)
+        private_file(db_path)
         self.db.execute('PRAGMA secure_delete=ON')
         self.db.executescript('''CREATE TABLE IF NOT EXISTS documents(id TEXT PRIMARY KEY,title TEXT,path TEXT,added TEXT,pages INTEGER);
 CREATE VIRTUAL TABLE IF NOT EXISTS pages USING fts5(doc UNINDEXED,page UNINDEXED,text);''')
@@ -54,7 +194,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS pages USING fts5(doc UNINDEXED,page UNINDEXED
         write_json(p,{'version':1,'messages':app.messages[1:],'sources':app.sources,
                       'allowed_files':sorted(app.allowed_files),'online':app.online,'mode':app.mode})
     def load(self,label,app):
-        value=json.loads((self.sessions/(name(label)+'.json')).read_text())
+        p=self.sessions/(name(label)+'.json')
+        if p.exists():private_file(p)
+        value=json.loads(p.read_text(encoding='utf-8'))
         if value.get('version')!=1:raise ValueError('Unsupported saved chat version.')
         messages=value['messages'];sources=value['sources']
         if not isinstance(messages,list) or not isinstance(sources,dict):raise ValueError('Invalid saved chat.')
@@ -122,10 +264,27 @@ class Credentials:
     SERVICES={'courtlistener':('CourtListener','https://www.courtlistener.com/'),
               'pacer':('PACER','https://pacer.uscourts.gov/')}
     def __init__(self,root=ROOT):self.path=Path(root)/'accounts.json'
-    def metadata(self):return json.loads(self.path.read_text()) if self.path.exists() else {}
+    def metadata(self):
+        if not self.path.exists():return {}
+        private_file(self.path)
+        return json.loads(self.path.read_text(encoding='utf-8'))
     def backend(self):
-        from keyring.backends.macOS import Keyring
-        return Keyring() # Explicit native backend; no plaintext fallback.
+        if sys.platform=='darwin':
+            from keyring.backends.macOS import Keyring
+            cls=Keyring
+        elif os.name=='nt':
+            from keyring.backends.Windows import WinVaultKeyring
+            cls=WinVaultKeyring
+        elif sys.platform.startswith('linux'):
+            from keyring.backends.SecretService import Keyring
+            cls=Keyring
+        else:
+            raise RuntimeError('No supported native OS credential store is available; refusing plaintext fallback.')
+        try:
+            if cls.priority<=0:raise RuntimeError('Native credential backend has non-positive priority.')
+        except Exception as exc:
+            raise RuntimeError('Native OS credential store is unavailable; refusing plaintext fallback.') from exc
+        return cls() # Explicit native backend; no plaintext fallback.
     def enroll(self,service):
         if service not in self.SERVICES:raise ValueError('Supported accounts: courtlistener, pacer.')
         account=input('Account name or email (leave blank to cancel): ').strip()
@@ -179,7 +338,7 @@ def handle(app,q,prompt,console,user_path):
     if q=='/chats':show('\n'.join(store.chats()) or 'No saved chats.');return True
     if q.startswith('/chat-save '):
         label=q[11:].strip()
-        if label in store.chats() and not confirm('Replace saved chat '+label+'?'):return True
+        if label.casefold() in {c.casefold() for c in store.chats()} and not confirm('Replace saved chat '+label+'?'):return True
         store.save(label,app);show('Saved locally: '+label);return True
     if q.startswith('/chat-load '):
         if len(app.messages)>1 and not confirm('Replace the current chat? Unsaved changes will be lost.'):return True

@@ -1,4 +1,4 @@
-import tempfile,unittest,json,io,contextlib
+import tempfile,unittest,json,io,contextlib,os
 from pathlib import Path
 from unittest.mock import patch
 from envy_terminal import features as f
@@ -9,13 +9,36 @@ class FeaturesTest(unittest.TestCase):
  def tearDown(self):self.store.db.close();self.temp.cleanup()
  def test_session_roundtrip_excludes_credentials(self):
   self.app.court_token='secret-token-never-persist';self.app.messages.append({'role':'user','content':'hello'});self.app.allowed_files.add('/a/file.pdf');self.app.online=False;self.app.mode='fast'
-  self.store.save('example',self.app);raw=(self.store.sessions/'example.json').read_text();self.assertNotIn('secret-token',raw)
+  self.store.save('example',self.app);raw=(self.store.sessions/'example.json').read_text(encoding='utf-8');self.assertNotIn('secret-token',raw)
   other=e.Research(self.store);self.store.load('example',other);self.assertEqual(other.messages[-1]['content'],'hello');self.assertFalse(other.online);self.assertEqual(other.mode,'fast');self.assertEqual(other.allowed_files,{'/a/file.pdf'});self.assertIsNone(other.court_token)
   self.store.delete_chat('example');self.assertEqual(self.store.chats(),[])
  def test_private_storage_and_traversal(self):
-  self.assertEqual(self.store.root.stat().st_mode&0o777,0o700)
-  with self.assertRaises(ValueError):self.store.save('../../escape',self.app)
-  self.store.save('safe',self.app);self.assertEqual((self.store.sessions/'safe.json').stat().st_mode&0o777,0o600)
+  for bad in ('../../escape','CON','nul','com1','',' leading','a'*81):
+   with self.assertRaises(ValueError):self.store.save(bad,self.app)
+  self.store.save('safe',self.app);self.store.configure()
+  safe=self.store.sessions/'safe.json';db=self.store.root/'library.sqlite3';cfg=self.store.config
+  if os.name=='nt':
+   sid=f.windows_user_sid()
+   for d in (self.store.root,self.store.sessions):
+    f.verify_windows_sddl(f.windows_sddl(d),sid,is_dir=True)
+   for file_path in (safe,db,cfg):
+    f.verify_windows_sddl(f.windows_sddl(file_path),sid,is_dir=False)
+  else:
+   for d in (self.store.root,self.store.sessions):
+    self.assertEqual(d.stat().st_mode&0o777,0o700)
+   for file_path in (safe,db,cfg):
+    self.assertEqual(file_path.stat().st_mode&0o777,0o600)
+  sid='S-1-5-21-1000-2000-3000-1001'
+  f.verify_windows_sddl(f'D:PAI(A;OICI;FA;;;{sid})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)',sid,is_dir=True)
+  f.verify_windows_sddl(f'D:PAI(A;;FA;;;{sid})(A;;FA;;;SY)(A;;FA;;;BA)',sid,is_dir=False)
+  for insecure in (
+   f'D:AI(A;OICI;FA;;;{sid})',
+   f'D:P(A;OICIID;FA;;;{sid})',
+   f'D:P(A;OICI;FA;;;{sid})(A;OICI;FA;;;WD)',
+   f'D:P(A;OICI;FA;;;{sid})(A;OICI;FA;;;BU)',
+   'D:P(A;OICI;FA;;;SY)',
+  ):
+   with self.assertRaises(PermissionError):f.verify_windows_sddl(insecure,sid,is_dir=True)
  def test_library_offline_and_delete(self):
   p=self.root/'evidence.txt';p.write_text('The hearing was postponed to September. A complaint is an allegation.')
   ident,count,blank=self.store.add_document(p,'/missing/ocr');self.assertEqual(count,1)
@@ -39,7 +62,11 @@ class FeaturesTest(unittest.TestCase):
   b=Backend()
   with patch.object(c,'backend',return_value=b),patch('builtins.input',return_value='test@example.invalid'),patch('getpass.getpass',return_value='x'*30):
    self.assertTrue(c.enroll('courtlistener'))
-  self.assertNotIn('x'*30,c.path.read_text());self.assertEqual(b.args,('local.envyterminal.courtlistener','test@example.invalid','x'*30))
+  self.assertNotIn('x'*30,c.path.read_text(encoding='utf-8'));self.assertEqual(b.args,('local.envyterminal.courtlistener','test@example.invalid','x'*30))
+  if os.name=='nt':f.verify_windows_sddl(f.windows_sddl(c.path),f.windows_user_sid(),is_dir=False)
+  else:self.assertEqual(c.path.stat().st_mode&0o777,0o600)
+  with patch.object(f.sys,'platform','unsupported'),patch.object(f.os,'name','posix'):
+   with self.assertRaises(RuntimeError):c.backend()
  def test_citation_audit(self):
   self.app.add_source('Snippet','https://example.invalid','summary','search snippet — not verified')
   self.app.messages.append({'role':'assistant','content':'claim [S1] and [S999]'})
