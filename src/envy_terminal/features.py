@@ -14,8 +14,22 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = Path(os.environ.get('ENVY_DATA_DIR', str(Path.home()/'Library/Application Support/ENVY Terminal/data')))
-OCR_HELPER = Path(os.environ.get('ENVY_OCR', str(Path.home()/'Library/Application Support/ENVY Terminal/envy-ocr')))
+def default_support_dir():
+    if sys.platform=='darwin':
+        return Path.home()/'Library/Application Support/ENVY Terminal'
+    if sys.platform=='win32':
+        base=Path(os.environ.get('LOCALAPPDATA') or (Path.home()/'AppData/Local'))
+        return base/'ENVY Terminal'
+    base=Path(os.environ.get('XDG_DATA_HOME') or (Path.home()/'.local/share'))
+    return base/'envy-terminal'
+
+def credential_store_label():
+    if sys.platform=='darwin':return 'macOS Keychain'
+    if sys.platform=='win32':return 'Windows Credential Manager'
+    return 'OS Secret Service keyring'
+
+ROOT = Path(os.environ.get('ENVY_DATA_DIR', str(default_support_dir()/'data')))
+OCR_HELPER = Path(os.environ.get('ENVY_OCR', str(default_support_dir()/('envy-ocr.exe' if os.name=='nt' else 'envy-ocr'))))
 FAST_MODEL = os.environ.get('ENVY_FAST_MODEL','qwen3:8b')
 RESERVED_NAMES = {'CON','PRN','AUX','NUL'}|{f'COM{i}' for i in range(1,10)}|{f'LPT{i}' for i in range(1,10)}
 
@@ -363,9 +377,9 @@ FEATURE_HELP='''/fast or /deep           Choose quick Qwen or detailed Fable (sa
 /library-remove <ID>      Remove the index, keeping the original file
 /check <claim>            Research a claim with an evidence/contradictions table
 /audit                    Check citation IDs and source types in the last answer
-/account-add <service>    Store courtlistener or pacer credentials in macOS Keychain
+/account-add <service>    Store courtlistener or pacer credentials in native OS credential store
 /account-use courtlistener  Connect the stored token for this session
-/account-remove <service>  Remove an ENVY credential from Keychain
+/account-remove <service>  Remove an ENVY credential from native OS credential store
 /accounts                 Show ENVY account names/websites (never passwords)
 '''
 
@@ -426,8 +440,9 @@ def handle(app,q,prompt,console,user_path):
         show('\n'.join(f'{s}: {v["account"]} · {v["website"]}' for s,v in records.items()) or 'No accounts stored by ENVY.');return True
     if q.startswith('/account-add '):
         service=q[13:].strip().lower()
-        show('Credentials go into macOS Keychain, never model prompts or chat exports. PACER storage does not enable automatic login or paid access.')
-        if Credentials(store.root).enroll(service):show('Saved to Keychain. Use /account-use courtlistener to connect a stored API token.')
+        store_label=credential_store_label()
+        show(f'Credentials go into {store_label}, never model prompts or chat exports. PACER storage does not enable automatic login or paid access.')
+        if Credentials(store.root).enroll(service):show(f'Saved to {store_label}. Use /account-use courtlistener to connect a stored API token.')
         return True
     if q.startswith('/account-use '):
         if q[13:].strip()!='courtlistener':raise ValueError('Only CourtListener API access is supported. PACER is still a manual login workflow.')
@@ -436,7 +451,7 @@ def handle(app,q,prompt,console,user_path):
         app.court_token=value;show('CourtListener token connected for this session.');return True
     if q.startswith('/account-remove '):
         service=q[16:].strip().lower()
-        if confirm('Delete the ENVY Keychain credential for '+service+'?'):
+        if confirm('Delete the ENVY '+credential_store_label()+' credential for '+service+'?'):
             Credentials(store.root).delete(service)
             if service=='courtlistener':app.court_token=None
             show('Credential deleted.')
