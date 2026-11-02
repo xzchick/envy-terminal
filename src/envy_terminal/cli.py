@@ -402,15 +402,10 @@ def main():
             if q.startswith('/file '):app.attach(q[6:]);continue
             if q.startswith('/save '):
                 p=user_path(q[6:])
-                fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-                try:
-                    features.private_file(p)
-                except Exception:
-                    os.close(fd)
-                    p.unlink(missing_ok=True)
-                    raise
-                with os.fdopen(fd,'w',encoding='utf-8') as f:json.dump({'messages':app.messages,'sources':app.sources},f,ensure_ascii=False,indent=2)
-                console.print('Saved only at your request: '+str(p),markup=False);continue
+                locked=features.save_private_export(p,{'messages':app.messages,'sources':app.sources})
+                msg='Saved only at your request: '+str(p)
+                if not locked:msg+=' (warning: target filesystem did not allow strict owner-only permissions)'
+                console.print(msg,markup=False);continue
             if q=='/pacer':
                 console.print('PACER requires your own account. Searches/documents may incur fees. No automated paid access is enabled.\nDownload records there and use /file to analyze them locally.')
                 if prompt.prompt('Open the official PACER site? [y/N] ').lower()=='y':

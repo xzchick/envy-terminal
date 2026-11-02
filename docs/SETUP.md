@@ -5,7 +5,7 @@
 ENVY Terminal supports macOS, Windows, and Linux:
 
 - **macOS**: Uses `~/Library/Application Support/ENVY Terminal`, macOS Keychain, and builds the optional Apple Vision PDF OCR helper (`envy-ocr`) when Xcode Command Line Tools (`xcode-select --install`) are installed.
-- **Windows**: Uses `%LOCALAPPDATA%\ENVY Terminal` (protected with owner-only NTFS DACLs), Windows Credential Manager, and PowerShell launchers (`scripts/setup.ps1`, `scripts/start.ps1`).
+- **Windows**: Uses `%LOCALAPPDATA%\ENVY Terminal` (protected with explicit `D:P` NTFS DACLs granting access only to the current user SID, `SYSTEM`, and `BUILTIN\Administrators`), Windows Credential Manager, and PowerShell launchers (`scripts/setup.ps1`, `scripts/start.ps1`).
 - **Linux**: Uses `${XDG_DATA_HOME:-~/.local/share}/envy-terminal` (`0700`/`0600`), freedesktop Secret Service keyring, and POSIX shell launchers (`scripts/setup.sh`, `scripts/start.sh`).
 
 Install from the official sources:
@@ -29,9 +29,9 @@ sh scripts/start.sh
 ```
 
 ```powershell
-# Windows PowerShell
-pwsh -File scripts/setup.ps1
-pwsh -File scripts/start.ps1
+# Windows PowerShell 5.1 or PowerShell 7
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+powershell -ExecutionPolicy Bypass -File scripts\start.ps1
 ```
 
 `setup.sh` creates `.venv` using locked dependencies and Python 3.12. It starts/reuses Ollama at `127.0.0.1:11435`, downloads `qwen3:8b` (~5.2 GB), and builds the OCR helper if the Swift compiler is available. It does not copy chats or credentials from an existing ENVY installation. The public project has a separate `ENVY Terminal` data folder and Keychain namespace.

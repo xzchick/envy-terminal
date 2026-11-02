@@ -21,6 +21,41 @@ class SmokeTests(unittest.TestCase):
         with patch.object(features.sys, 'platform', 'linux'), patch.dict(features.os.environ, {'XDG_DATA_HOME': '/tmp/xdg'}, clear=False):
             self.assertEqual(features.default_support_dir(), Path('/tmp/xdg') / 'envy-terminal')
             self.assertEqual(features.credential_store_label(), 'OS Secret Service keyring')
+        with patch.object(features.sys, 'platform', 'linux'), patch.dict(features.os.environ, {'XDG_DATA_HOME': 'relative/path'}, clear=False):
+            self.assertEqual(features.default_support_dir(), Path.home() / '.local/share/envy-terminal')
+
+    def test_launcher_rejects_non_loopback_ollama_url(self):
+        import subprocess
+        repo = Path(__file__).resolve().parent.parent
+        env = dict(os.environ, ENVY_OLLAMA_URL='http://192.168.1.50:11435')
+        if os.name == 'nt':
+            cmd = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(repo / 'scripts' / 'start.ps1'), '-ServeOnly']
+        else:
+            cmd = ['sh', str(repo / 'scripts' / 'start.sh'), '--serve-only']
+        proc = subprocess.run(cmd, cwd=repo, env=env, capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn('custom local service', proc.stdout + proc.stderr)
+
+    def test_save_private_export_and_external_drive_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / 'export.json'
+            self.assertTrue(features.save_private_export(target, {'ok': True}))
+            self.assertEqual(json.loads(target.read_text(encoding='utf-8')), {'ok': True})
+            if os.name == 'nt':
+                sid = features.windows_user_sid()
+                features.verify_windows_sddl(features.windows_sddl(target), sid, is_dir=False)
+            else:
+                self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+            with self.assertRaises(FileExistsError):
+                features.save_private_export(target, {'ok': False})
+            usb_target = Path(tmp) / 'usb-export.json'
+            if os.name == 'nt':
+                with patch.object(features, 'private_file', side_effect=PermissionError('FAT32 unsupported')):
+                    self.assertFalse(features.save_private_export(usb_target, {'usb': True}))
+            else:
+                with patch.object(features.os, 'fchmod', side_effect=PermissionError('FAT32 EPERM')):
+                    self.assertFalse(features.save_private_export(usb_target, {'usb': True}))
+            self.assertEqual(json.loads(usb_target.read_text(encoding='utf-8')), {'usb': True})
 
     def test_user_path_preserves_windows_backslashes_and_strips_quotes(self):
         win_raw = r'"C:\Users\Example User\Documents\filing.pdf"'

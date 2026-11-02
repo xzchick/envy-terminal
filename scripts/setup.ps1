@@ -11,7 +11,7 @@ try {
     }
     uv sync --locked --no-editable --python 3.12
     if ($LASTEXITCODE -ne 0) { throw 'uv sync failed.' }
-    uv run --no-editable python -c "from envy_terminal.features import private_dir, default_support_dir; private_dir(default_support_dir())"
+    uv run --locked --no-editable python -c "from envy_terminal.features import private_dir, default_support_dir; private_dir(default_support_dir())"
     if ($LASTEXITCODE -ne 0) { throw 'Failed to initialize private Windows support directory.' }
     if (-not $SkipServe -and $env:ENVY_SKIP_SERVE -ne '1') {
         if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
@@ -25,7 +25,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'ollama pull failed.' }
         }
     }
-    Write-Host "`nReady. Start with: pwsh -File scripts/start.ps1"
+    Write-Host "`nReady. Start with: powershell -ExecutionPolicy Bypass -File scripts\start.ps1"
     Write-Host 'Optional Fable install: uv run --no-editable python scripts/install_fable.py'
 } finally {
     Pop-Location
