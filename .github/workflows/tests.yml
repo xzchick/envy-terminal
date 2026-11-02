@@ -3,6 +3,7 @@ name: Cross-platform tests
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -31,16 +32,20 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/setup.ps1 -SkipModels -SkipServe
-      - name: Build distributable wheel and checksums
-        run: |
-          uv build --wheel --out-dir dist
-          uv run --no-editable python -c "import hashlib, pathlib; d=pathlib.Path('dist'); lines=[hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name for p in sorted(d.glob('*.whl'))]; (d/'SHA256SUMS.txt').write_bytes(('\n'.join(lines)+'\n').encode('utf-8')); print((d/'SHA256SUMS.txt').read_text(encoding='utf-8'))"
+      - name: Build standalone native OS bundle, wheel, sdist, and SHA256SUMS
+        run: uv run --no-editable python scripts/build_release_bundle.py
+      - name: Run clean-machine standalone bundle installation and launch smoke test
+        run: uv run --no-editable python scripts/smoke_test_release.py
       - name: Run public-package checks
         run: uv run --no-editable python scripts/check_public.py
-      - name: Upload platform wheel and checksum artifact
+      - name: Upload platform release bundle, wheel, and checksum artifacts
         uses: actions/upload-artifact@v4
         with:
           name: envy-terminal-${{ matrix.os }}-py${{ matrix.python-version }}
           path: |
+            dist/envy-terminal-v*.tar.gz
+            dist/envy-terminal-v*.zip
             dist/*.whl
+            dist/*.tar.gz
             dist/SHA256SUMS.txt
+          if-no-files-found: error
