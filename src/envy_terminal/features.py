@@ -20,7 +20,7 @@ def default_support_dir():
     if sys.platform=='win32':
         base=Path(os.environ.get('LOCALAPPDATA') or (Path.home()/'AppData/Local'))
         return base/'ENVY Terminal'
-    xdg=(os.environ.get('XDG_DATA_HOME') or '').strip()
+    xdg=os.environ.get('XDG_DATA_HOME') or ''
     base=Path(xdg) if xdg.startswith('/') else (Path.home()/'.local/share')
     return base/'envy-terminal'
 
@@ -219,11 +219,13 @@ def save_private_export(path,value):
         from ctypes import wintypes
         sid=windows_user_sid()
         sddl=f'D:P(A;;FA;;;{sid})(A;;FA;;;SY)(A;;FA;;;BA)'
-        advapi32=ctypes.windll.advapi32; kernel32=ctypes.windll.kernel32
+        advapi32=ctypes.WinDLL('advapi32',use_last_error=True)
+        kernel32=ctypes.WinDLL('kernel32',use_last_error=True)
         advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes=[
             wintypes.LPCWSTR,wintypes.DWORD,ctypes.POINTER(ctypes.c_void_p),ctypes.POINTER(wintypes.ULONG)]
         advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype=wintypes.BOOL
         kernel32.LocalFree.argtypes=[ctypes.c_void_p]
+        kernel32.CloseHandle.argtypes=[wintypes.HANDLE]
         class SECURITY_ATTRIBUTES(ctypes.Structure):
             _fields_=[('nLength',wintypes.DWORD),('lpSecurityDescriptor',ctypes.c_void_p),('bInheritHandle',wintypes.BOOL)]
         kernel32.CreateFileW.argtypes=[
@@ -232,18 +234,28 @@ def save_private_export(path,value):
         kernel32.CreateFileW.restype=wintypes.HANDLE
         sd=ctypes.c_void_p()
         if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl,1,ctypes.byref(sd),None):
-            raise PermissionError(f'Could not build Windows security descriptor for {path}')
+            raise PermissionError(f'Could not build Windows security descriptor for {path}: {ctypes.get_last_error()}')
         try:
             sa=SECURITY_ATTRIBUTES(ctypes.sizeof(SECURITY_ATTRIBUTES),sd,False)
             handle=kernel32.CreateFileW(str(path),0x40000000,0,ctypes.byref(sa),1,0x80,None)
             if handle==wintypes.HANDLE(-1).value:
-                raise OSError(f'Could not create private export file: {path}')
+                err=ctypes.get_last_error()
+                raise OSError(err,f'Could not create private export file: {path} (winerror {err})')
         finally:
             kernel32.LocalFree(sd)
-        fd=msvcrt.open_osfhandle(handle,os.O_WRONLY)
-        with os.fdopen(fd,'w',encoding='utf-8') as f:
-            json.dump(value,f,ensure_ascii=False,indent=2)
-            f.flush();os.fsync(f.fileno())
+        try:
+            fd=msvcrt.open_osfhandle(handle,os.O_WRONLY)
+        except Exception:
+            kernel32.CloseHandle(handle)
+            path.unlink(missing_ok=True)
+            raise
+        try:
+            with os.fdopen(fd,'w',encoding='utf-8') as f:
+                json.dump(value,f,ensure_ascii=False,indent=2)
+                f.flush();os.fsync(f.fileno())
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
         try:
             private_file(path)
             return True
@@ -255,22 +267,32 @@ def save_private_export(path,value):
             return False
     else:
         fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o600)
+        fchmod_ok=True
         try:
             st=os.fstat(fd)
             if not stat.S_ISREG(st.st_mode):
                 raise PermissionError(f'Refusing non-regular export file: {path}')
-            if hasattr(os,'fchmod'):os.fchmod(fd,0o600)
+            if hasattr(os,'fchmod'):
+                try:
+                    os.fchmod(fd,0o600)
+                except OSError:
+                    fchmod_ok=False
         except Exception:
             os.close(fd)
             path.unlink(missing_ok=True)
             raise
-        with os.fdopen(fd,'w',encoding='utf-8') as f:
-            json.dump(value,f,ensure_ascii=False,indent=2)
-            f.flush();os.fsync(f.fileno())
+        try:
+            with os.fdopen(fd,'w',encoding='utf-8') as f:
+                json.dump(value,f,ensure_ascii=False,indent=2)
+                f.flush();os.fsync(f.fileno())
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
         st_after=path.lstat()
         if _is_reparse_or_symlink(path,st_after) or not stat.S_ISREG(st_after.st_mode):
+            path.unlink(missing_ok=True)
             raise PermissionError(f'Export path changed to non-regular file: {path}')
-        return (st_after.st_mode&0o777)==0o600
+        return fchmod_ok and (st_after.st_mode&0o777)==0o600
 
 def write_json(path,value):
     path=Path(path)

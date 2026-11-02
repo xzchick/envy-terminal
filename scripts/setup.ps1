@@ -25,7 +25,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'ollama pull failed.' }
         }
     }
-    Write-Host "`nReady. Start with: pwsh -File scripts/start.ps1"
+    Write-Host "`nReady. Start with: powershell -ExecutionPolicy Bypass -File scripts\start.ps1"
     Write-Host 'Optional Fable install: uv run --no-editable python scripts/install_fable.py'
 } finally {
     Pop-Location

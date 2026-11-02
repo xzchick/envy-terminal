@@ -29,9 +29,9 @@ sh scripts/start.sh
 ```
 
 ```powershell
-# Windows PowerShell 5.1 or PowerShell 7 (if extracted from a downloaded ZIP, first run: Unblock-File .\scripts\*.ps1)
-powershell -File scripts\setup.ps1
-powershell -File scripts\start.ps1
+# Windows PowerShell 5.1 or PowerShell 7
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+powershell -ExecutionPolicy Bypass -File scripts\start.ps1
 ```
 
 `setup.sh` creates `.venv` using locked dependencies and Python 3.12. It starts/reuses Ollama at `127.0.0.1:11435`, downloads `qwen3:8b` (~5.2 GB), and builds the OCR helper if the Swift compiler is available. It does not copy chats or credentials from an existing ENVY installation. The public project has a separate `ENVY Terminal` data folder and Keychain namespace.
