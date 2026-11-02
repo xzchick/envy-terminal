@@ -371,7 +371,38 @@ HELP='''Chat normally; ENVY can search and read sources when needed.
 PDF tools can request additional pages from attached files even offline.
 '''+features.FEATURE_HELP
 
-def main():
+def main(argv=None):
+    args=list(sys.argv[1:] if argv is None else argv)
+    if args==['--version']:
+        print('0.1.0')
+        return 0
+    if args==['--init-support-dir']:
+        p=features.private_dir(features.default_support_dir())
+        print(str(p))
+        return 0
+    if len(args)==2 and args[0]=='--self-test':
+        export_target=Path(args[1])
+        support=features.private_dir(features.default_support_dir())
+        with tempfile.TemporaryDirectory(dir=support,prefix='.self-test-') as tmp_store_dir:
+            store=features.LocalStore(Path(tmp_store_dir)/'data')
+            try:
+                app=Research(store)
+                app.online=False
+                store.preferences['notes']=['Self-test note']
+                store.configure()
+                store.save('self-test-session',app)
+                locked=features.save_private_export(export_target,{'messages':app.messages,'sources':app.sources})
+                if os.name=='nt':
+                    sid=features.windows_user_sid()
+                    features.verify_windows_sddl(features.windows_sddl(support),sid,is_dir=True)
+                    features.verify_windows_sddl(features.windows_sddl(export_target),sid,is_dir=False)
+                else:
+                    if (support.lstat().st_mode&0o777)!=0o700 or (export_target.lstat().st_mode&0o777)!=0o600:
+                        raise PermissionError('Self-test permission check failed')
+                print(json.dumps({'self_test':'ok','locked':locked,'support_dir':str(support),'credential_store':features.credential_store_label()}))
+                return 0
+            finally:
+                store.db.close()
     app=Research(); prompt=PromptSession(history=InMemoryHistory())
     threading.Thread(target=warm_model,args=(features.FAST_MODEL if app.mode=='fast' else MODEL,),daemon=True).start()
     console.print('ENVY AI · Terminal',style='bold cyan')
