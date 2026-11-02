@@ -9,13 +9,13 @@ The repository contains program code, synthetic fixtures, diagrams, and generic 
 | Requested public URL | The requested website and any permitted redirects |
 | Indexed files and OCR text | Local SQLite index |
 | Saved chats/preferences | Local JSON files |
-| Credential secret entered through `/account-add` | macOS Keychain |
+| Credential secret entered through `/account-add` | Native OS credential store: macOS Keychain, Windows Credential Manager, or Linux Secret Service |
 | Account name and service website | Local account metadata |
 | CourtListener token, when activated | CourtListener's API for requested records |
 
-Default storage: `~/Library/Application Support/ENVY Terminal/data/`. Directories are mode 700 and app-created JSON/index files are mode 600. These local files are not separately encrypted by ENVY. Your OS, backups, exports, and Terminal state can retain data. Deletion here does not guarantee removal from backups.
+Default storage: `~/Library/Application Support/ENVY Terminal/data/` on macOS, `%LOCALAPPDATA%\ENVY Terminal\data\` on Windows, and `${XDG_DATA_HOME:-~/.local/share}/envy-terminal/data/` on Linux. On macOS and Linux, directories are mode 700 and app-created JSON/index files are mode 600; on Windows, an explicit NTFS ACL grants access only to the current user, `SYSTEM`, and `BUILTIN\Administrators`. These local files are not separately encrypted by ENVY. Your OS, backups, exports, and Terminal state can retain data. Deletion here does not guarantee removal from backups.
 
-Use `/offline` to disable ENVY web tools. This setting does not disable the Mac's networking, other programs, or a separate model server's cloud configuration. The included launcher sets local-only options for a server it starts. A pre-existing server must be configured separately.
+Use `/offline` to disable ENVY web tools. This setting does not disable the computer's networking, other programs, or a separate model server's cloud configuration. The included launcher sets local-only options for a server it starts. A pre-existing server must be configured separately.
 
 ## Enter credentials privately
 
@@ -30,9 +30,9 @@ Enter a service account name, then the token in the hidden prompt. The token is 
 /account-add pacer
 ```
 
-This stores a password but does not log into PACER automatically. `/pacer` remains manual. The credential backend is explicitly macOS Keychain; there is no plaintext fallback. Keychain access may require an OS prompt. Other software running as your user may have access according to your Keychain settings; this is not a separate password-manager security boundary.
+This stores a password but does not log into PACER automatically. `/pacer` remains manual. The credential backend is explicitly the native OS store (macOS Keychain, Windows Credential Manager, or Linux Secret Service); there is no plaintext fallback. Access may require an OS prompt. Other software running as your user may have access according to your credential-store settings; this is not a separate password-manager security boundary.
 
-`/accounts` displays saved account names and websites, never secrets. `/account-remove <service>` deletes ENVY's selected Keychain credential. Never type secrets into ordinary chat or preferences: those channels are model input and may be explicitly saved. The preference keyword check is only a convenience, not a comprehensive secret detector.
+`/accounts` displays saved account names and websites, never secrets. `/account-remove <service>` deletes ENVY's selected stored credential. Never type secrets into ordinary chat or preferences: those channels are model input and may be explicitly saved. The preference keyword check is only a convenience, not a comprehensive secret detector.
 
 ## Publishing your fork
 

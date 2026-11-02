@@ -1,6 +1,6 @@
 # Complete command guide
 
-Run `sh scripts/start.sh`, then enter commands at `You ›`. Paths containing spaces may be quoted; dragging a file from Finder inserts a usable path. Commands run only when typed by the user, not when requested by a model or a retrieved page.
+Run `sh scripts/start.sh` (macOS and Linux) or `powershell -ExecutionPolicy Bypass -File scripts\start.ps1` (Windows), then enter commands at `You ›`. Paths containing spaces may be quoted; dragging a file from Finder, File Explorer, or a Linux file manager into the terminal inserts a usable path. Commands run only when typed by the user, not when requested by a model or a retrieved page.
 
 ## Chat and speed
 
@@ -63,10 +63,10 @@ Local library search and already attached files remain usable offline. `/audit` 
 
 | Command | Meaning |
 |---|---|
-| `/account-add courtlistener` | Prompt for account name and hidden API token; save the secret to macOS Keychain |
+| `/account-add courtlistener` | Prompt for account name and hidden API token; save the secret to the OS credential store |
 | `/account-use courtlistener` | Activate the saved token for this session |
 | `/court-auth` | Enter a token for this session only, without saving it |
-| `/account-add pacer` | Save a PACER credential to Keychain; no automatic login or purchases |
+| `/account-add pacer` | Save a PACER credential to the OS credential store; no automatic login or purchases |
 | `/accounts` | Show ENVY-stored account names and service websites, never secrets |
 | `/account-remove courtlistener` | Remove the selected credential after confirmation; also supports `pacer` |
 | `/pacer` | Open the official PACER site manually after the fee notice and confirmation |

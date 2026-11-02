@@ -18,7 +18,7 @@ CI runs the offline unit tests and public-package checker. It does not download 
 
 Known limitations:
 
-- macOS-first setup, OCR, and credentials; no Windows/Linux compatibility promise.
+- Scanned-PDF OCR is macOS-only (Apple Vision). Windows and Linux are covered by CI unit, installer, and standalone-bundle smoke tests on every push, but have had less hands-on testing with live models than macOS.
 - Keyword search can miss semantically related text; no embedding model is included.
 - OCR and model answers may be wrong; inspect original pages.
 - Character-based history trimming is approximate, not unlimited context.
