@@ -226,10 +226,24 @@ The v0.1.0 release will include standalone bundles that don't need Python or uv;
 | `envy-terminal-v0.1.0-windows-x86_64.zip` | Windows on 64-bit x86 |
 | `envy-terminal-v0.1.0-linux-x86_64.tar.gz` | Linux on 64-bit x86 |
 | `envy_terminal-0.1.0-py3-none-any.whl` | Any OS with Python 3.12+ (`pip` or `uv`) |
+| `sbom.cdx.json` | CycloneDX SBOM: every package inside the release |
 | `SHA256SUMS.txt` | Checksums for every file above |
+| `SHA256SUMS.txt.sigstore.json` | Sigstore signature for `SHA256SUMS.txt` |
 
 <details>
 <summary><b>Verify and run a bundle</b></summary>
+
+**Check the signature (optional, needs [cosign](https://docs.sigstore.dev/cosign/system_config/installation/))**
+
+`SHA256SUMS.txt` is signed by this repository's release workflow with Sigstore (keyless), so you can check it came from here:
+
+```sh
+cosign verify-blob \
+  --bundle SHA256SUMS.txt.sigstore.json \
+  --certificate-identity-regexp 'https://github.com/xzchick/envy-terminal/.github/workflows/release.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS.txt
+```
 
 **macOS and Linux**
 
@@ -241,7 +255,7 @@ sh ./setup-envy.sh
 sh ./start-envy.sh
 ```
 
-The bundle isn't signed, so macOS may quarantine it. Check its checksum first, then remove the quarantine flag with `xattr -dr com.apple.quarantine envy-terminal-v0.1.0-macos-*`.
+The bundle isn't notarized by Apple, so macOS may quarantine it. Check its checksum first, then remove the quarantine flag with `xattr -dr com.apple.quarantine envy-terminal-v0.1.0-macos-*`.
 
 **Windows PowerShell**
 
