@@ -1,4 +1,4 @@
-# ENVY Terminal v0.1.0 Release Notes (Draft / Non-Production)
+# ENVY Terminal v0.1.0 Release Notes (early release)
 
 ## Overview
 ENVY Terminal is a local-first research, document analysis, and citation-auditing assistant for **macOS, Windows, and Linux**. It runs against a dedicated local loopback Ollama server (`127.0.0.1:11435`, `OLLAMA_NO_CLOUD=1`) and stores credentials exclusively in native OS credential stores (macOS Keychain, Windows Credential Manager, or Linux Secret Service).
@@ -15,7 +15,9 @@ Each GitHub Release provides two distinct distribution tiers:
    - `envy_terminal-0.1.0-py3-none-any.whl` — Pure-Python wheel (not a standalone OS installer)
    - `envy_terminal-0.1.0.tar.gz` — Source distribution
 3. **Checksums:**
-   - `SHA256SUMS.txt` — LF-normalized SHA-256 checksums for every archive, wheel, and sdist above
+   - `SHA256SUMS.txt` — SHA-256 checksums for every archive, wheel, sdist and the SBOM
+   - `SHA256SUMS.txt.sigstore.json` — Sigstore (keyless) signature for `SHA256SUMS.txt`
+   - `sbom.cdx.json` — CycloneDX SBOM of every package inside the release
 
 > **Privacy & Model Policy:** No Ollama model weights (`.gguf`), private databases, chat histories, or credentials are bundled in any release artifact. Install [Ollama](https://ollama.com/download) separately; the setup launcher pulls `qwen3:8b` locally when you run setup.
 

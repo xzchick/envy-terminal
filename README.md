@@ -59,7 +59,7 @@ ENVY talks to a model running on **your own computer** through [Ollama](https://
 | Saved account tokens | macOS Keychain | Windows Credential Manager | Secret Service (GNOME Keyring, KWallet, KeePassXC) |
 | Owner-only data folder | `0700` / `0600` | NTFS ACL: you, SYSTEM, Administrators | `0700` / `0600` |
 | Launchers | `setup.sh`, `start.sh` | `setup.ps1`, `start.ps1` | `setup.sh`, `start.sh` |
-| Standalone bundle (draft v0.1.0) | Apple Silicon (arm64) | x86_64 | x86_64 |
+| Standalone bundle (v0.1.0) | Apple Silicon (arm64) | x86_64 | x86_64 |
 | Tested in CI on every push | ✅ | ✅ | ✅ |
 
 On Windows and Linux, text-based PDFs work normally. Pages with no text layer, such as scans, are reported as unreadable instead of being treated as blank.
@@ -216,9 +216,9 @@ uv --version
 ollama --version
 ```
 
-### Prebuilt bundles (coming with v0.1.0)
+### Prebuilt bundles
 
-The v0.1.0 release will include standalone bundles that don't need Python or uv; you install only Ollama. They're still a draft. When they're published, you'll download them from **Releases**:
+The [v0.1.0 release](https://github.com/xzchick/envy-terminal/releases/latest) has standalone bundles that don't need Python or uv; you install only Ollama. Download them from **Releases**:
 
 | File | System |
 |---|---|
